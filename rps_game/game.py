@@ -19,11 +19,12 @@ from urllib.parse import urlparse
 from cvzone.HandTrackingModule import HandDetector
 
 # ─── Hand Detector ───────────────────────────────────────────────────────────
-hd = HandDetector(maxHands=1)
+hd = HandDetector(maxHands=2)
 
 # ─── TFLite 모델 로딩 (sample_01 동일 방식) ───────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODEL_CANDIDATES = [
+    # 학습한 모델 추가
     os.path.join(_SCRIPT_DIR, '..', 'examples', '03_CNN_Based_On-Device_AI',
                  'RPS_MobileNetV2_Augmentation.tflite'),
     os.path.join(_SCRIPT_DIR, '..', 'examples', '03_CNN_Based_On-Device_AI',
@@ -38,6 +39,82 @@ output_details = interpreter.get_output_details()
 input_dtype    = input_details[0]['dtype']
 IMG_SIZE       = 224
 offset         = 30
+
+
+
+# ─── 비동기 감지 워커 (별도 스레드에서 손 감지 + 제스처 분류) ──────────────────
+class AsyncDetector:
+    """Background thread: hand detection + gesture classification."""
+
+    def __init__(self):
+        self._lock = Lock()
+        self._latest_frame = None
+        self._has_new = False
+        self._results = []
+        self._running = True
+        self._thread = Thread(target=self._loop, daemon=True)
+        self._thread.start()
+
+    def submit(self, frame):
+        with self._lock:
+            self._latest_frame = frame.copy()
+            self._has_new = True
+
+    def get_results(self):
+        with self._lock:
+            return list(self._results)
+
+    def stop(self):
+        self._running = False
+        self._thread.join(timeout=2)
+
+    def _loop(self):
+        while self._running:
+            with self._lock:
+                if not self._has_new or self._latest_frame is None:
+                    frame = None
+                else:
+                    frame = self._latest_frame.copy()
+                    self._has_new = False
+            if frame is None:
+                time.sleep(0.005)
+                continue
+            results = self._detect(frame)
+            with self._lock:
+                self._results = results
+
+    def _detect(self, frame):
+        fh, fw = frame.shape[:2]
+        hands, _ = hd.findHands(frame, draw=False)
+        if not hands:
+            return []
+        results = []
+        for hand in hands:
+            x, y, w, h = hand['bbox']
+            x1 = max(0, x - offset)
+            y1 = max(0, y - offset)
+            x2 = min(fw - 1, x + w + offset)
+            y2 = min(fh - 1, y + h + offset)
+            if x2 <= x1 or y2 <= y1:
+                continue
+            cx = (x1 + x2) // 2
+            cy = (y1 + y2) // 2
+            img = frame[y1:y2, x1:x2]
+            img = make_square_img(img)
+            img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+            img = np.expand_dims(img, 0)
+            interpreter.set_tensor(input_details[0]['index'],
+                                   img.astype(input_dtype))
+            interpreter.invoke()
+            output_data = interpreter.get_tensor(
+                output_details[0]['index'])[0]
+            ans = int(np.argmax(output_data))
+            gesture = ansToText[ans]
+            results.append({
+                'gesture': gesture, 'cx': cx, 'cy': cy, 'w': w,
+                'bbox': (x1, y1, x2, y2), 'ans': ans,
+            })
+        return results
 
 # ─── 카메라 / 화면 해상도 ────────────────────────────────────────────────────
 CAM_W, CAM_H = 1024, 600
@@ -216,43 +293,16 @@ def make_square_img(img):
     return wbg
 
 
-# ─── 제스처 감지 (sample_01 방식, zone 없음) ─────────────────────────────────
-def detect_gesture(frame):
-    """현재 프레임에서 (gesture, cx, cy, w) 반환. 손 없으면 (None, None, None, None)."""
-    fh, fw = frame.shape[:2]
-    hands, _ = hd.findHands(frame, draw=False)
-    if not hands:
-        return None, None, None, None
-
-    x, y, w, h = hands[0]['bbox']
-    x1 = max(0,      x - offset)
-    y1 = max(0,      y - offset)
-    x2 = min(fw - 1, x + w + offset)
-    y2 = min(fh - 1, y + h + offset)
-    if x2 <= x1 or y2 <= y1:
-        return None, None, None, None
-
-    # 손 중심 좌표
-    cx = (x1 + x2) // 2
-    cy = (y1 + y2) // 2
-
-    # crop → make_square → 모델 추론 (sample_01 동일)
-    img = frame[y1:y2, x1:x2]
-    img = make_square_img(img)
-    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-    img = np.expand_dims(img, 0)
-
-    interpreter.set_tensor(input_details[0]['index'], img.astype(input_dtype))
-    interpreter.invoke()
-    output_data = interpreter.get_tensor(output_details[0]['index'])[0]
-    ans     = int(np.argmax(output_data))
-    gesture = ansToText[ans]
-
-    # BB + 아이콘 표시 (sample_01 동일)
-    cv2.rectangle(frame, (x1, y1), (x2, y2), colorList[ans], 2)
-    cv2.putText(frame, GES_ICON[gesture], (x1, y1 - 7),
-                cv2.FONT_HERSHEY_PLAIN, 2, colorList[ans], 2)
-    return gesture, cx, cy, w
+# ─── 감지 결과로부터 손 오버레이 그리기 ──────────────────────────────────────
+def draw_hand_overlays(frame, det_results):
+    """AsyncDetector 결과 리스트를 받아 BB + 아이콘을 프레임에 표시."""
+    for det in det_results:
+        x1, y1, x2, y2 = det['bbox']
+        ans = det['ans']
+        gesture = det['gesture']
+        cv2.rectangle(frame, (x1, y1), (x2, y2), colorList[ans], 2)
+        cv2.putText(frame, GES_ICON[gesture], (x1, y1 - 7),
+                    cv2.FONT_HERSHEY_PLAIN, 2, colorList[ans], 2)
 
 
 # ─── 타겟 생성 ───────────────────────────────────────────────────────────────
@@ -270,15 +320,14 @@ def new_target(fw, fh):
         'start':   time.time(),
     }
 
-
 # ─── 타겟 원 그리기 ───────────────────────────────────────────────────────────
-def draw_target(canvas, target, hold_progress=0.0):
+def draw_target(canvas, target, hold_progress=0.0, target_dur=TARGET_DURATION):
     x, y, r   = target['x'], target['y'], target['r']
     ges        = target['gesture']
     idx        = GESTURES.index(ges)
     color      = colorList[idx]
     elapsed    = time.time() - target['start']
-    time_ratio = max(0.0, 1.0 - elapsed / TARGET_DURATION)
+    time_ratio = max(0.0, 1.0 - elapsed / target_dur)
 
     # 반투명 채움
     overlay = canvas.copy()
@@ -310,7 +359,6 @@ def draw_target(canvas, target, hold_progress=0.0):
     (tw, th), _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.45, 1)
     cv2.putText(canvas, label, (x - tw // 2, y + r + th + 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
-
 
 # ─── HUD ─────────────────────────────────────────────────────────────────────
 def draw_hud(canvas, score, round_idx, det_ges):
@@ -456,46 +504,41 @@ def main():
                     g['state']  = 'PLAYING'
                     g['target'] = new_target(fw, fh)
 
-            # ── PLAYING ──────────────────────────────────────────────────────
+           # ── PLAYING ──────────────────────────────────────────────────────
             elif g['state'] == 'PLAYING':
-                det_ges, hand_cx, hand_cy, hand_w = detect_gesture(frame)
-                g['last_det_ges'] = det_ges
+                det_results = detector.get_results()
+                draw_hand_overlays(frame, det_results)
+
+                det_gestures      = [d['gesture'] for d in det_results]
+                g['last_det_ges'] = det_gestures
                 target            = g['target']
-                # 라운드가 진행될수록 타겟 지속시간을 지수감소하여 속도 증가
                 target_duration = max(MIN_TARGET_DURATION,
-                                      TARGET_DURATION * (DECAY_RATE ** g['round_idx']))
+                                    TARGET_DURATION * (DECAY_RATE ** g['round_idx']))
                 elapsed           = now - target['start']
                 hold_progress     = 0.0
 
-                # 위치 판정: 손 중심이 타겟 원 안에 있는지 확인
-                in_target = False
-                # 손 크기 기준 (너무 작거나 너무 크면 판정 무효화)
-                size_ok = False
-                if hand_w is not None:
+                # 모든 손에 대해 타겟 판정 (multi-hand)
+                any_match = False
+                for det in det_results:
+                    hand_cx, hand_cy, hand_w = det['cx'], det['cy'], det['w']
                     min_w = int(fw * 0.08)
                     max_w = int(fw * 0.75)
                     size_ok = (min_w <= hand_w <= max_w)
-
-                if hand_cx is not None:
-                    dist = ((hand_cx - target['x']) ** 2 + (hand_cy - target['y']) ** 2) ** 0.5
+                    dist = ((hand_cx - target['x']) ** 2
+                            + (hand_cy - target['y']) ** 2) ** 0.5
                     in_target = size_ok and (dist <= target['r'])
-                    # 손이 원 안에 있을 때 원을 밝게 표시
                     if in_target:
-                        cv2.circle(frame, (target['x'], target['y']), target['r'], (255, 255, 255), 2)
+                        cv2.circle(frame, (target['x'], target['y']),
+                                target['r'], (255, 255, 255), 2)
+                    if in_target and det['gesture'] == target['gesture']:
+                        any_match = True
 
-                # 디버그: HUD에 hand_w와 허용범위 표시 (짧게)
-                if hand_w is not None:
-                    cv2.putText(frame, f'w:{hand_w}', (10, HUD_H + 20), cv2.FONT_HERSHEY_SIMPLEX, 0.5, (200,200,200),1)
-                    cv2.putText(frame, f'min:{min_w} max:{max_w}', (10, HUD_H + 40), cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200,200,200),1)
-
-                if in_target and det_ges == target['gesture']:
+                if any_match:
                     if g['hold_start'] is None:
                         g['hold_start'] = now
                     held          = now - g['hold_start']
                     hold_progress = min(1.0, held / HOLD_TIME)
-
                     if held >= HOLD_TIME:
-                        # 반응 시간 보너스: 빠를수록 최대 TIME_BONUS_MAX 추가
                         time_bonus        = int(TIME_BONUS_MAX * max(0.0, 1.0 - elapsed / target_duration))
                         g['score']       += BASE_SCORE + time_bonus
                         g['last_result']  = 'SUCCESS'
