@@ -1,1 +1,8 @@
 old/
+env/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyd
+*.pyo
+*.whl
