@@ -19,10 +19,11 @@ def _recv_json(reader) -> Optional[dict]:
 
 
 class LanServer:
-    def __init__(self, host: str, port: int, expected_clients: int = 3):
+    def __init__(self, host: str, port: int, expected_clients: int = 3, min_start_players: int = 2):
         self.host = host
         self.port = port
         self.expected_clients = expected_clients
+        self.min_start_players = max(1, min_start_players)
         self.server_sock: Optional[socket.socket] = None
         self.clients: List[Tuple[socket.socket, object, str]] = []
 
@@ -55,15 +56,18 @@ class LanServer:
 
         name = msg.get('name') or f'client_{len(self.clients) + 1}'
         self.clients.append((conn, reader, name))
-        expected_total = self.expected_clients + 1
+        joined_total = len(self.clients) + 1
+        expected_total = joined_total
+        capacity_total = self.expected_clients + 1
         _send_json(
             conn,
             {
                 'type': 'join_ack',
                 'ok': True,
                 'player': name,
-                'joined': len(self.clients) + 1,
+                'joined': joined_total,
                 'expected': expected_total,
+                'capacity': capacity_total,
             },
         )
         print(f'[LAN] Joined {name} from {addr} ({len(self.clients)} clients)')
@@ -80,6 +84,7 @@ class LanServer:
             'joined': int(joined_count),
             'ready': int(ready_count),
             'expected': int(expected_total),
+            'capacity': int(self.expected_clients + 1),
         }
         for conn, _, _ in self.clients:
             try:
@@ -98,7 +103,6 @@ class LanServer:
 
         ready_clients = set()
         host_ready = False
-        expected_total = self.expected_clients + 1
         last_state = (-1, -1, -1)
 
         while True:
@@ -142,6 +146,7 @@ class LanServer:
                     ready_clients.add(name)
 
             joined_count = len(self.clients) + 1
+            expected_total = joined_count
             total_ready = (1 if host_ready else 0) + len(ready_clients)
 
             state = (joined_count, total_ready, expected_total)
@@ -151,7 +156,7 @@ class LanServer:
                 self._broadcast_ready_state(joined_count, total_ready, expected_total)
                 last_state = state
 
-            if total_ready >= expected_total:
+            if joined_count >= self.min_start_players and total_ready >= expected_total:
                 return
 
             time.sleep(0.05)

@@ -8,6 +8,8 @@ class LanConfig:
     port: int = 5000
     discovery_port: int = 5001
     expected_clients: int = 3
+    min_start_players: int = 2
+    start_delay_s: float = 3.0
 
 
 @dataclass(frozen=True)

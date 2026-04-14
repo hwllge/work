@@ -118,7 +118,7 @@ def _open_camera(game_cfg):
     return None, None
 
 
-def _server_thread(server: LanServer, lan_st: LanState):
+def _server_thread(server: LanServer, lan_st: LanState, start_delay_s: float):
     try:
         def _on_ready_progress(joined_count: int, ready_count: int, expected: int):
             with lan_st.lock:
@@ -133,6 +133,14 @@ def _server_thread(server: LanServer, lan_st: LanState):
         )
         if lan_st._cancel_event.is_set():
             return
+
+        if start_delay_s > 0:
+            wait_until = time.time() + start_delay_s
+            while time.time() < wait_until:
+                if lan_st._cancel_event.is_set():
+                    return
+                time.sleep(0.05)
+
         server.send_start()
         with lan_st.lock:
             lan_st.started = True
@@ -393,7 +401,12 @@ class WebGameApp:
                             self._lan_st.expected = self.lan_cfg.expected_clients + 1
 
                             if self.lobby['mode'] == 'host':
-                                self._server = LanServer('0.0.0.0', self.lan_cfg.port, self.lan_cfg.expected_clients)
+                                self._server = LanServer(
+                                    '0.0.0.0',
+                                    self.lan_cfg.port,
+                                    self.lan_cfg.expected_clients,
+                                    self.lan_cfg.min_start_players,
+                                )
                                 self._server.start()
                                 self._lan_st.joined = 1
                                 self._announcer = LanRoomAnnouncer(
@@ -405,7 +418,7 @@ class WebGameApp:
                                 )
                                 self._announcer.start()
                                 t = threading.Thread(target=_server_thread,
-                                                     args=(self._server, self._lan_st), daemon=True)
+                                                     args=(self._server, self._lan_st, self.lan_cfg.start_delay_s), daemon=True)
                                 t.start()
                             else:
                                 self._client = LanClient(self.lobby['ip'].strip(), self.lan_cfg.port, self.lobby['name'].strip())

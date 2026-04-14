@@ -123,7 +123,7 @@ LAN_NICKNAMES = [
 
 # ── Background threads ───────────────────────────────────────────────────────
 
-def _server_thread(server: LanServer, lan_st: LanState):
+def _server_thread(server: LanServer, lan_st: LanState, start_delay_s: float):
     try:
         def _on_ready_progress(joined_count: int, ready_count: int, expected: int):
             with lan_st.lock:
@@ -138,6 +138,14 @@ def _server_thread(server: LanServer, lan_st: LanState):
         )
         if lan_st._cancel_event.is_set():
             return
+
+        if start_delay_s > 0:
+            wait_until = time.time() + start_delay_s
+            while time.time() < wait_until:
+                if lan_st._cancel_event.is_set():
+                    return
+                time.sleep(0.05)
+
         server.send_start()
         with lan_st.lock:
             lan_st.started = True
@@ -348,7 +356,12 @@ def run(game_cfg, ges_cfg, lan_cfg):
                     lan_st.expected = lan_cfg.expected_clients + 1
 
                     if lobby['mode'] == 'host':
-                        _server = LanServer('0.0.0.0', lan_cfg.port, lan_cfg.expected_clients)
+                        _server = LanServer(
+                            '0.0.0.0',
+                            lan_cfg.port,
+                            lan_cfg.expected_clients,
+                            lan_cfg.min_start_players,
+                        )
                         _server.start()
                         lan_st.joined = 1
                         _announcer = LanRoomAnnouncer(
@@ -360,7 +373,7 @@ def run(game_cfg, ges_cfg, lan_cfg):
                         )
                         _announcer.start()
                         t = threading.Thread(target=_server_thread,
-                                             args=(_server, lan_st), daemon=True)
+                                             args=(_server, lan_st, lan_cfg.start_delay_s), daemon=True)
                         t.start()
                     else:
                         _client = LanClient(lobby['ip'].strip(), lan_cfg.port, lobby['name'].strip())
