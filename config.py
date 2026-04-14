@@ -24,6 +24,7 @@ class GameConfig:
 
     base_score: int = 100
     time_bonus_max: int = 50
+    max_score: int = 1500
 
     decay_rate: float = 0.95
     min_target_duration: float = 0.6

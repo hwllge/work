@@ -354,21 +354,26 @@ def run(game_cfg, ges_cfg, lan_cfg):
             elapsed = engine.update_countdown(now, fw, fh)
             renderer.draw_countdown(frame, max(0, 3 - int(elapsed)))
 
-        # ── PLAYING ──────────────────────────────────────────────────────
+        # ── PLAYING ────────────────────────────────────────────────────────────────
         elif state == GameEngine.PLAYING:
-            hand_info = detector.detect(frame, engine.state['target'])
-            play_info = engine.update_playing(now, fw, hand_info)
-            target = engine.state['target']
+            all_hands = detector.detect_all(frame)
+            play_info = engine.update_playing(now, fw, all_hands)
+            targets = engine.state['targets']
+            cleared = engine.state['cleared']
 
-            renderer.draw_target(frame, target,
-                                 hold_progress=play_info['hold_progress'],
-                                 target_duration=play_info['target_duration'])
+            for i, target in enumerate(targets):
+                renderer.draw_target(frame, target,
+                                     hold_progress=play_info['hold_progresses'][i],
+                                     target_duration=play_info['target_duration'])
+                if play_info['in_targets'][i]:
+                    cv2.circle(frame, (target['x'], target['y']),
+                               target['r'], (255, 255, 255), 2)
+                if cleared[i]:
+                    cv2.putText(frame, 'OK', (target['x'] - 18, target['y'] + 10),
+                                cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 128), 3, cv2.LINE_AA)
             renderer.draw_hud(frame, engine.state['score'],
                               engine.state['round_idx'] + 1,
                               engine.state['last_det_ges'])
-            if play_info['in_target']:
-                cv2.circle(frame, (target['x'], target['y']),
-                           target['r'], (255, 255, 255), 2)
             if play_info['hand_w'] is not None:
                 cv2.putText(frame, f"w:{play_info['hand_w']}",
                             (10, game_cfg.hud_h + 20),
@@ -377,16 +382,18 @@ def run(game_cfg, ges_cfg, lan_cfg):
                             f"min:{play_info['min_w']} max:{play_info['max_w']}",
                             (10, game_cfg.hud_h + 40),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.45, (200, 200, 200), 1)
-
         # ── RESULT ───────────────────────────────────────────────────────
         elif state == GameEngine.RESULT:
-            renderer.draw_target(frame, engine.state['target'])
+            for target in engine.state['targets']:
+                renderer.draw_target(frame, target)
             renderer.draw_hud(frame, engine.state['score'],
                               engine.state['round_idx'] + 1,
                               engine.state['last_det_ges'])
-            renderer.draw_result(frame, engine.state['last_result'] == 'SUCCESS')
+            renderer.draw_result(frame,
+                                 engine.state['last_result'] == 'SUCCESS',
+                                 hit_count=engine.state['last_round_hits'],
+                                 hit_total=len(engine.state['targets']))
             engine.update_result(now, fw, fh)
-
         # ── GAMEOVER (single-player or LAN intermediate) ─────────────────
         elif state == GameEngine.GAMEOVER:
             if lan_st is not None:

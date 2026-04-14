@@ -194,13 +194,15 @@ class GameRenderer:
             cv2.LINE_AA,
         )
 
-    def draw_hud(self, canvas, score, round_idx, det_ges):
+    def draw_hud(self, canvas, score, round_idx, det_ges, hit_count=None, hit_total=2):
         fh, fw = canvas.shape[:2]
         cv2.rectangle(canvas, (0, 0), (fw, self.cfg.hud_h), (20, 20, 20), -1)
+        max_score = getattr(self.cfg, 'max_score', 0)
+        score_txt = f'SCORE: {score}' if max_score <= 0 else f'SCORE: {score}/{max_score}'
 
         cv2.putText(
             canvas,
-            f'SCORE: {score}',
+            score_txt,
             (10, 26),
             cv2.FONT_HERSHEY_SIMPLEX,
             0.62,
@@ -237,9 +239,30 @@ class GameRenderer:
                 cv2.LINE_AA,
             )
 
-    def draw_result(self, canvas, success):
+        if hit_count is not None:
+            hit_txt = f'HIT: {hit_count}/{hit_total}'
+            (tw, _), _ = cv2.getTextSize(hit_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
+            cv2.putText(
+                canvas,
+                hit_txt,
+                ((fw - tw) // 2, self.cfg.hud_h - 6),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.52,
+                (250, 230, 120),
+                1,
+                cv2.LINE_AA,
+            )
+
+    def draw_result(self, canvas, success, hit_count=None, hit_total=2):
         fh, fw = canvas.shape[:2]
-        msg = 'PERFECT!' if success else 'MISS...'
+        if hit_count == hit_total:
+            msg = 'PERFECT!'
+        elif hit_count is not None and hit_count > 0:
+            msg = 'GOOD!'
+        else:
+            msg = 'MISS...'
+        if hit_count is not None:
+            msg = f'{msg} ({hit_count}/{hit_total})'
         color = (0, 255, 128) if success else (0, 80, 255)
         scale = max(1.0, 1.4 * fw / self.cfg.cam_w)
         (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, scale, 3)
@@ -265,6 +288,7 @@ class GameRenderer:
             cv2.LINE_AA,
         )
 
+
     def draw_gameover(self, canvas, score):
         fh, fw = canvas.shape[:2]
         sc = fw / self.cfg.cam_w
@@ -272,7 +296,11 @@ class GameRenderer:
         cv2.rectangle(overlay, (0, 0), (fw, fh), (0, 0, 0), -1)
         cv2.addWeighted(overlay, 0.65, canvas, 0.35, 0, canvas)
 
-        max_score = self.cfg.total_rounds * (self.cfg.base_score + self.cfg.time_bonus_max)
+        max_score = getattr(
+            self.cfg,
+            'max_score',
+            self.cfg.total_rounds * (self.cfg.base_score + self.cfg.time_bonus_max),
+        )
         lines = [
             ('GAME OVER', 1.10 * sc, (0, 210, 255), 2),
             (f'Score: {score} / {max_score}', 0.85 * sc, (255, 255, 255), 2),
