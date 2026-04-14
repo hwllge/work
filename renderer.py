@@ -415,6 +415,37 @@ class GameRenderer:
 
         return {'restart': (rx, by, rx2, ry2), 'menu': (mx, by, mx2, my2)}
 
+    def draw_lan_finish_waiting(self, canvas, score):
+        """Shown when local player finishes a LAN match before others."""
+        fh, fw = canvas.shape[:2]
+        sc = fw / self.cfg.cam_w
+        overlay = canvas.copy()
+        cv2.rectangle(overlay, (0, 0), (fw, fh), (0, 0, 0), -1)
+        cv2.addWeighted(overlay, 0.78, canvas, 0.22, 0, canvas)
+
+        max_score = getattr(
+            self.cfg,
+            'max_score',
+            self.cfg.total_rounds * (self.cfg.base_score + self.cfg.time_bonus_max),
+        )
+
+        title = 'YOU FINISHED!'
+        (tw, _), _ = cv2.getTextSize(title, cv2.FONT_HERSHEY_SIMPLEX, 1.1 * sc, 3)
+        cv2.putText(canvas, title, ((fw - tw) // 2, int(fh * 0.28)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.1 * sc, (0, 220, 255), 3, cv2.LINE_AA)
+
+        score_txt = f'Your score: {score} / {max_score}'
+        (sw, _), _ = cv2.getTextSize(score_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.80 * sc, 2)
+        cv2.putText(canvas, score_txt, ((fw - sw) // 2, int(fh * 0.44)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.80 * sc, (255, 255, 255), 2, cv2.LINE_AA)
+
+        wait_txt = 'Waiting for other players to finish...'
+        (ww, _), _ = cv2.getTextSize(wait_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.62 * sc, 1)
+        cv2.putText(canvas, wait_txt, ((fw - ww) // 2, int(fh * 0.62)),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.62 * sc, (200, 200, 200), 1, cv2.LINE_AA)
+
+        return {}
+
     def draw_countdown(self, canvas, n):
         fh, fw = canvas.shape[:2]
         overlay = canvas.copy()
