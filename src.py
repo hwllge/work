@@ -356,7 +356,7 @@ def run(game_cfg, ges_cfg, lan_cfg):
 
         # ── PLAYING ──────────────────────────────────────────────────────
         elif state == GameEngine.PLAYING:
-            hand_info = detector.detect(frame)
+            hand_info = detector.detect(frame, engine.state['target'])
             play_info = engine.update_playing(now, fw, hand_info)
             target = engine.state['target']
 

@@ -17,12 +17,15 @@ class GestureDetector:
         self._hands = self._mp_hands.Hands(
             model_complexity=0,
             max_num_hands=2,
-            min_detection_confidence=0.6,
-            min_tracking_confidence=0.6,
+            min_detection_confidence=0.5,
+            min_tracking_confidence=0.5,
         )
-        self._min_handedness_score = 0.65
-        self._min_hand_width_ratio = 0.07
-        self._duplicate_iou_threshold = 0.35
+        # Lower threshold so the second hand is less likely to be dropped.
+        self._min_handedness_score = 0.5
+        # Allow smaller hands so distant users are still detected.
+        self._min_hand_width_ratio = 0.03
+        # Do not aggressively suppress nearby hands.
+        self._duplicate_iou_threshold = 0.75
         self._min_label_y = 16
 
         self._trackers: Dict[str, _HandTracker] = {
@@ -200,66 +203,57 @@ def _angle_deg(a, b, c) -> float:
     return math.degrees(math.acos(cos_theta))
 
 
-def _is_finger_extended(lm, mcp_idx: int, pip_idx: int, dip_idx: int, tip_idx: int, prev_open: bool) -> bool:
-    pip_angle = _angle_deg(lm[mcp_idx], lm[pip_idx], lm[dip_idx])
-    dip_angle = _angle_deg(lm[pip_idx], lm[dip_idx], lm[tip_idx])
+def _is_finger_extended(lm, mcp_idx: int, pip_idx: int, dip_idx: int, tip_idx: int,
+                        prev_open: bool, palm_scale: float) -> bool:
+    """Return True only when BOTH conditions hold:
+    1. All three joint angles are nearly straight.
+    2. Fingertip is far enough from the palm core (not tucked in).
+    """
+    # ── 1. Angle check (3 joints: MCP-PIP-DIP, PIP-DIP-TIP, MCP-PIP-TIP) ──
+    mcp_pip_angle = _angle_deg(lm[mcp_idx], lm[pip_idx], lm[dip_idx])
+    pip_dip_angle = _angle_deg(lm[pip_idx], lm[dip_idx], lm[tip_idx])
+    mcp_tip_angle = _angle_deg(lm[mcp_idx], lm[pip_idx], lm[tip_idx])
     if prev_open:
-        straight = pip_angle > 145.0 and dip_angle > 145.0
+        angles_ok = mcp_pip_angle > 125.0 and pip_dip_angle > 125.0 and mcp_tip_angle > 120.0
     else:
-        straight = pip_angle > 155.0 and dip_angle > 155.0
+        angles_ok = mcp_pip_angle > 135.0 and pip_dip_angle > 135.0 and mcp_tip_angle > 130.0
 
-    base_len = _distance3(lm[pip_idx], lm[mcp_idx])
-    tip_len = _distance3(lm[tip_idx], lm[mcp_idx])
-    if base_len == 0.0:
-        return False
+    # ── 2. Tip-to-palm-core distance check ──────────────────────────────────
+    core = _palm_core_xyz(lm)
+    tip_to_core = _distance3_xyz(lm[tip_idx], core)
+    far_enough = tip_to_core > palm_scale * 1.0
 
-    length_ratio = tip_len / base_len
-    if prev_open:
-        return straight and length_ratio > 1.55
-    return straight and length_ratio > 1.68
+    return angles_ok and far_enough
 
 
 def _get_finger_state(hand_landmarks, prev_state: _FingerState) -> _FingerState:
     lm = hand_landmarks.landmark
 
     palm_scale = (_distance3(lm[0], lm[9]) + _distance3(lm[5], lm[17])) / 2.0
-    thumb_inside_fist = _is_thumb_inside_fist(lm, palm_scale)
-    thumb_ip_angle = _angle_deg(lm[2], lm[3], lm[4])
-    thumb_mcp_angle = _angle_deg(lm[1], lm[2], lm[3])
-    thumb_reach_tip = _distance3(lm[4], lm[5])
-    thumb_reach_ip = _distance3(lm[3], lm[5])
-
-    if thumb_inside_fist:
-        thumb_open = False
-    elif prev_state.thumb:
-        thumb_open = (
-            thumb_ip_angle > 143.0
-            and thumb_mcp_angle > 138.0
-            and thumb_reach_tip > palm_scale * 0.48
-            and thumb_reach_tip > thumb_reach_ip * 1.04
-        )
+    # ── Thumb: same two-condition logic as other fingers ──────────────────
+    # Joint indices: CMC(1)-MCP(2)-IP(3)-TIP(4). Use IP angle + MCP angle + tip distance.
+    thumb_mcp_ip_angle = _angle_deg(lm[1], lm[2], lm[3])
+    thumb_ip_tip_angle = _angle_deg(lm[2], lm[3], lm[4])
+    thumb_mcp_tip_angle = _angle_deg(lm[1], lm[2], lm[4])
+    core = _palm_core_xyz(lm)
+    thumb_tip_to_core = _distance3_xyz(lm[4], core)
+    if prev_state.thumb:
+        thumb_angles_ok = (thumb_mcp_ip_angle > 125.0
+                           and thumb_ip_tip_angle > 125.0
+                           and thumb_mcp_tip_angle > 120.0)
+        thumb_far_enough = thumb_tip_to_core > palm_scale * 0.82
     else:
-        thumb_open = (
-            thumb_ip_angle > 150.0
-            and thumb_mcp_angle > 145.0
-            and thumb_reach_tip > palm_scale * 0.54
-            and thumb_reach_tip > thumb_reach_ip * 1.08
-        )
+        thumb_angles_ok = (thumb_mcp_ip_angle > 133.0
+                           and thumb_ip_tip_angle > 133.0
+                           and thumb_mcp_tip_angle > 128.0)
+        thumb_far_enough = thumb_tip_to_core > palm_scale * 0.90
+    thumb_open = thumb_angles_ok and thumb_far_enough
 
-    index_open = _is_finger_extended(lm, 5, 6, 7, 8, prev_state.index)
-    middle_open = _is_finger_extended(lm, 9, 10, 11, 12, prev_state.middle)
-    ring_open = _is_finger_extended(lm, 13, 14, 15, 16, prev_state.ring)
-    pinky_open = _is_finger_extended(lm, 17, 18, 19, 20, prev_state.pinky)
-
-    # Suppress false "open" on angled poses when folded fingertips stay near palm core.
-    if _is_finger_folded_near_palm(lm, mcp_idx=5, pip_idx=6, tip_idx=8, palm_scale=palm_scale):
-        index_open = False
-    if _is_finger_folded_near_palm(lm, mcp_idx=9, pip_idx=10, tip_idx=12, palm_scale=palm_scale):
-        middle_open = False
-    if _is_finger_folded_near_palm(lm, mcp_idx=13, pip_idx=14, tip_idx=16, palm_scale=palm_scale):
-        ring_open = False
-    if _is_finger_folded_near_palm(lm, mcp_idx=17, pip_idx=18, tip_idx=20, palm_scale=palm_scale):
-        pinky_open = False
+    # ── Four fingers: 3-joint angle + tip-to-core distance ──────────────────
+    index_open  = _is_finger_extended(lm,  5,  6,  7,  8, prev_state.index,  palm_scale)
+    middle_open = _is_finger_extended(lm,  9, 10, 11, 12, prev_state.middle, palm_scale)
+    ring_open   = _is_finger_extended(lm, 13, 14, 15, 16, prev_state.ring,   palm_scale)
+    pinky_open  = _is_finger_extended(lm, 17, 18, 19, 20, prev_state.pinky,  palm_scale)
 
     return _FingerState(
         thumb=thumb_open,
@@ -328,21 +322,28 @@ def _is_thumb_inside_fist(lm, palm_scale):
     thumb_ip = lm[3]
     index_mcp = lm[5]
     middle_mcp = lm[9]
+    thumb_ip_angle = _angle_deg(lm[2], lm[3], lm[4])
+    thumb_mcp_angle = _angle_deg(lm[1], lm[2], lm[3])
+    curled = thumb_ip_angle < 138.0 or thumb_mcp_angle < 132.0
 
-    # If thumb tip and IP are both close to palm core, treat thumb as folded.
+    # If thumb tip and IP are both close to palm core and curled, treat thumb as folded.
     tip_dist = _distance3_xyz(thumb_tip, core)
     ip_dist = _distance3_xyz(thumb_ip, core)
-    core_folded = tip_dist < palm_scale * 0.94 and ip_dist < palm_scale * 0.84
+    core_folded = tip_dist < palm_scale * 0.88 and ip_dist < palm_scale * 0.80 and curled
 
-    # In fist pose, thumb tip often stays close to index/middle MCP area.
+    # In fist pose, thumb tip often stays close to index/middle MCP area and curled.
     tip_to_index_mcp = _distance3(thumb_tip, index_mcp)
     tip_to_middle_mcp = _distance3(thumb_tip, middle_mcp)
-    mcp_folded = tip_to_index_mcp < palm_scale * 0.72 and tip_to_middle_mcp < palm_scale * 0.86
+    mcp_folded = (
+        tip_to_index_mcp < palm_scale * 0.64
+        and tip_to_middle_mcp < palm_scale * 0.78
+        and curled
+    )
 
     return core_folded or mcp_folded
 
 
-def _is_finger_folded_near_palm(lm, mcp_idx, pip_idx, tip_idx, palm_scale):
+def _is_finger_folded_near_palm(lm, mcp_idx, pip_idx, dip_idx, tip_idx, palm_scale):
     core = _palm_core_xyz(lm)
     tip = lm[tip_idx]
     pip = lm[pip_idx]
@@ -354,10 +355,13 @@ def _is_finger_folded_near_palm(lm, mcp_idx, pip_idx, tip_idx, palm_scale):
     if pip_to_mcp == 0.0:
         return True
 
-    # Folded finger tends to keep tip close to palm core and not much farther than PIP from MCP.
-    near_core = tip_to_core < palm_scale * 1.05
-    short_reach = tip_to_mcp < pip_to_mcp * 1.60
-    return near_core and short_reach
+    # Folded finger tends to keep tip close to palm core, short-reach, and curled joints.
+    near_core = tip_to_core < palm_scale * 0.92
+    short_reach = tip_to_mcp < pip_to_mcp * 1.38
+    pip_angle = _angle_deg(lm[mcp_idx], lm[pip_idx], lm[dip_idx])
+    dip_angle = _angle_deg(lm[pip_idx], lm[dip_idx], lm[tip_idx])
+    curled = pip_angle < 140.0 or dip_angle < 140.0
+    return near_core and short_reach and curled
 
 
 def _palm_core_xyz(lm):

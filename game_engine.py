@@ -78,14 +78,14 @@ class GameEngine:
         max_w = None
 
         if hand_w is not None:
-            min_w = int(fw * 0.06)
+            min_w = int(fw * 0.04)
             max_w = int(fw * 0.85)
             size_ok = min_w <= hand_w <= max_w
 
         if hand_cx is not None:
             dist = ((hand_cx - target['x']) ** 2 + (hand_cy - target['y']) ** 2) ** 0.5
             # Add margin so near-center hands are still counted as hit.
-            hit_radius = target['r'] + (max(12, int(hand_w * 0.12)) if hand_w is not None else 12)
+            hit_radius = target['r'] + (max(16, int(hand_w * 0.14)) if hand_w is not None else 16)
             in_target = size_ok and (dist <= hit_radius)
 
         if in_target and det_ges == target['gesture']:
