@@ -158,16 +158,13 @@ def _client_thread(client: LanClient, lan_st: LanState):
             lan_st.expected = ack.get('expected', 3)
             lan_st.ready = 1 if lan_st.local_ready else 0
 
-        lan_st._ready_event.wait()
-        client.send_ready()
-
         def _on_ready_state(ready_count: int, expected: int):
             with lan_st.lock:
                 lan_st.ready = ready_count
                 lan_st.expected = expected
                 lan_st.joined = expected
 
-        client.wait_start(on_ready_state=_on_ready_state)
+        client.wait_start(ready_event=lan_st._ready_event, on_ready_state=_on_ready_state)
         with lan_st.lock:
             lan_st.started = True
 

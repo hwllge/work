@@ -197,11 +197,25 @@ class LanClient:
             raise RuntimeError(f'Join failed: {reason}')
         return ack
 
-    def wait_start(self, on_ready_state=None):
-        if self.reader is None:
+    def wait_start(self, ready_event: Optional[threading.Event] = None, on_ready_state=None):
+        if self.reader is None or self.sock is None:
             raise RuntimeError('Client is not connected.')
+
+        # Keep receiving ready-state updates in real time even before this client
+        # presses READY. Send READY once the local event is set.
+        self.sock.settimeout(0.2)
+        ready_sent = False
+
         while True:
-            msg = _recv_json(self.reader)
+            if ready_event is not None and ready_event.is_set() and not ready_sent:
+                self.send_ready()
+                ready_sent = True
+
+            try:
+                msg = _recv_json(self.reader)
+            except socket.timeout:
+                continue
+
             if not msg:
                 raise RuntimeError('Server connection closed before start signal.')
 
