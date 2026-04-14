@@ -35,6 +35,16 @@ class GameRenderer:
             cv2.LINE_AA,
         )
 
+    def draw_exit_button(self, canvas):
+        fh, fw = canvas.shape[:2]
+        bw = max(92, int(fw * 0.10))
+        bh = max(34, int(fh * 0.06))
+        x1 = fw - bw - 12
+        y1 = 8
+        rect = (x1, y1, x1 + bw, y1 + bh)
+        self._draw_button(canvas, 'EXIT', rect, (70, 70, 180), text_color=(255, 255, 255))
+        return rect
+
     def draw_menu(self, canvas):
         fh, fw = canvas.shape[:2]
         overlay = canvas.copy()

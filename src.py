@@ -528,11 +528,13 @@ def run(game_cfg, ges_cfg, lan_cfg):
                 _client = None
                 engine.state['state'] = GameEngine.MENU
 
+            buttons['exit'] = renderer.draw_exit_button(frame)
+
         input_mgr.set_buttons(buttons)
         cv2.imshow(WIN, frame)
         key = cv2.waitKey(10) & 0xFF
 
-        if key == ord('q'):
+        if key == ord('q') or clicked == 'exit':
             break
         if key == ord('r') and state == GameEngine.GAMEOVER and lan_st is None:
             engine.reset()
