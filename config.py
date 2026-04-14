@@ -17,16 +17,21 @@ class GameConfig:
     cam_w: int = 1024
     cam_h: int = 600
 
-    total_rounds: int = 10
-    target_duration: float = 3.0
+    total_rounds: int = 20
+    target_duration: float = 5.0
     result_show: float = 0.5
-    hold_time: float = 0.3
-    target_radius: int = 70
+    hold_time: float = 0.2
+    hold_grace: float = 0.15
+    target_radius: int = 60
     hud_h: int = 40
 
     base_score: int = 100
     time_bonus_max: int = 50
-    max_score: int = 1500
+    max_score: int = 3000
+
+    hand_min_ratio: float = 0.08
+    hand_max_ratio: float = 0.60
+    max_targets: int = 2
 
     decay_rate: float = 0.95
     min_target_duration: float = 0.6

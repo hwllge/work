@@ -237,8 +237,19 @@ class GameRenderer:
         )
 
         if det_ges:
-            idx = self.ges_cfg.gestures.index(det_ges)
-            det_txt = f'[ {det_ges} ]'
+            if isinstance(det_ges, list):
+                valid = [g for g in det_ges if g in self.ges_cfg.gestures]
+                if not valid:
+                    valid = det_ges
+                primary = valid[0] if valid else None
+                det_txt = '[ ' + ' | '.join(valid[:2]) + ' ]'
+            else:
+                primary = det_ges
+                det_txt = f'[ {det_ges} ]'
+
+            if primary not in self.ges_cfg.gestures:
+                primary = self.ges_cfg.gestures[0]
+            idx = self.ges_cfg.gestures.index(primary)
             (tw, _), _ = cv2.getTextSize(det_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
             cv2.putText(
                 canvas,
@@ -264,6 +275,23 @@ class GameRenderer:
                 1,
                 cv2.LINE_AA,
             )
+
+    def draw_flashes(self, canvas, flashes, now):
+        for f in flashes:
+            if f.get('expire', 0) <= now:
+                continue
+            msg = f.get('msg', '')
+            color = f.get('color', (255, 255, 255))
+            x = int(f.get('x', 0))
+            y = int(f.get('y', 0))
+            scale = 0.9
+            (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, scale, 2)
+            tx = x - tw // 2
+            ty = y - self.cfg.target_radius - 18
+            cv2.putText(canvas, msg, (tx + 2, ty + 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, scale, (10, 10, 10), 2, cv2.LINE_AA)
+            cv2.putText(canvas, msg, (tx, ty),
+                        cv2.FONT_HERSHEY_SIMPLEX, scale, color, 2, cv2.LINE_AA)
 
     def draw_result(self, canvas, hit_count=0, hit_total=2, round_score=0):
         fh, fw = canvas.shape[:2]
