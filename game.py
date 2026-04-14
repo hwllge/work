@@ -499,6 +499,19 @@ def run(game_cfg, ges_cfg, lan_cfg):
                     if not lan_st._score_event.is_set():
                         lan_st.set_score(engine.state['score'])
                     renderer.draw_gameover(frame, engine.state['score'])
+
+                    wait_msg = 'Waiting for other players to finish...'
+                    sub_msg = f'Your score: {engine.state["score"]}'
+                    (w1, _), _ = cv2.getTextSize(wait_msg, cv2.FONT_HERSHEY_SIMPLEX, 0.62, 2)
+                    (w2, _), _ = cv2.getTextSize(sub_msg, cv2.FONT_HERSHEY_SIMPLEX, 0.56, 1)
+                    x1 = (fw - w1) // 2
+                    x2 = (fw - w2) // 2
+                    y1 = int(fh * 0.90)
+                    y2 = int(fh * 0.95)
+                    cv2.putText(frame, wait_msg, (x1, y1),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.62, (215, 215, 215), 2, cv2.LINE_AA)
+                    cv2.putText(frame, sub_msg, (x2, y2),
+                                cv2.FONT_HERSHEY_SIMPLEX, 0.56, (170, 170, 170), 1, cv2.LINE_AA)
                 else:
                     engine.state['state'] = GameEngine.LAN_LEADERBOARD
             else:
