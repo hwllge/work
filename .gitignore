@@ -1,8 +1,14 @@
-old/
-env/
 __pycache__/
-**/__pycache__/
 *.pyc
-*.pyd
 *.pyo
-*.whl
+*.pyd
+
+# TFLite models are large binaries — track intentionally or exclude
+# Uncomment the line below to stop tracking them:
+# models/
+
+# Common editor / OS noise
+.vscode/
+.idea/
+*.swp
+.DS_Store
