@@ -6,6 +6,10 @@ import time
 from typing import Dict, List, Optional, Tuple
 
 
+# Lower polling interval for snappier READY state propagation.
+LAN_POLL_S = 0.03
+
+
 def _send_json(sock: socket.socket, payload: dict):
     data = (json.dumps(payload, ensure_ascii=True) + '\n').encode('utf-8')
     sock.sendall(data)
@@ -111,7 +115,7 @@ class LanServer:
 
             if len(self.clients) < self.expected_clients:
                 try:
-                    readable, _, _ = select.select([self.server_sock], [], [], 0.2)
+                    readable, _, _ = select.select([self.server_sock], [], [], LAN_POLL_S)
                 except Exception:
                     readable = []
                 if readable:
@@ -159,7 +163,7 @@ class LanServer:
             if joined_count >= self.min_start_players and total_ready >= expected_total:
                 return
 
-            time.sleep(0.05)
+            time.sleep(0.01)
 
     def collect_scores(self) -> List[Dict[str, int]]:
         results: List[Dict[str, int]] = []
@@ -259,7 +263,7 @@ class LanClient:
                 ready_sent = True
 
             try:
-                readable, _, _ = select.select([self.sock], [], [], 0.2)
+                readable, _, _ = select.select([self.sock], [], [], LAN_POLL_S)
             except Exception:
                 readable = []
 
