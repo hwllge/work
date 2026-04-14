@@ -1,4 +1,5 @@
 import json
+import select
 import socket
 import threading
 import time
@@ -43,8 +44,18 @@ class LanServer:
             conn.close()
             return False
 
+        if len(self.clients) >= self.expected_clients:
+            _send_json(conn, {'type': 'join_ack', 'ok': False, 'reason': 'room_full'})
+            try:
+                reader.close()
+            except Exception:
+                pass
+            conn.close()
+            return False
+
         name = msg.get('name') or f'client_{len(self.clients) + 1}'
         self.clients.append((conn, reader, name))
+        expected_total = self.expected_clients + 1
         _send_json(
             conn,
             {
@@ -52,8 +63,7 @@ class LanServer:
                 'ok': True,
                 'player': name,
                 'joined': len(self.clients) + 1,
-                # do not force full room; expected is current joined count (host included)
-                'expected': len(self.clients) + 1,
+                'expected': expected_total,
             },
         )
         print(f'[LAN] Joined {name} from {addr} ({len(self.clients)} clients)')
@@ -64,33 +74,47 @@ class LanServer:
             _send_json(conn, {'type': 'start'})
         print('[LAN] Match started.')
 
-    def _broadcast_ready_state(self, ready_count: int, expected_total: int):
-        payload = {'type': 'ready_state', 'ready': int(ready_count), 'expected': int(expected_total)}
+    def _broadcast_ready_state(self, joined_count: int, ready_count: int, expected_total: int):
+        payload = {
+            'type': 'ready_state',
+            'joined': int(joined_count),
+            'ready': int(ready_count),
+            'expected': int(expected_total),
+        }
         for conn, _, _ in self.clients:
             try:
                 _send_json(conn, payload)
             except Exception:
                 pass
 
-    def wait_all_ready(self, host_ready_event: threading.Event, on_progress=None):
+    def wait_all_ready(
+        self,
+        host_ready_event: threading.Event,
+        on_progress=None,
+        stop_event: Optional[threading.Event] = None,
+    ):
         if self.server_sock is None:
             raise RuntimeError('Server is not started.')
 
-        self.server_sock.settimeout(0.2)
         ready_clients = set()
         host_ready = False
-        last_state = (-1, -1)
+        expected_total = self.expected_clients + 1
+        last_state = (-1, -1, -1)
 
         while True:
-            try:
-                joined = self._accept_one_join()
-                if joined:
-                    conn, _, _ = self.clients[-1]
-                    conn.settimeout(0.2)
-            except socket.timeout:
-                pass
+            if stop_event is not None and stop_event.is_set():
+                return
 
-            expected_total = len(self.clients) + 1
+            if len(self.clients) < self.expected_clients:
+                try:
+                    readable, _, _ = select.select([self.server_sock], [], [], 0.2)
+                except Exception:
+                    readable = []
+                if readable:
+                    try:
+                        self._accept_one_join()
+                    except Exception:
+                        pass
 
             if not host_ready and host_ready_event.is_set():
                 host_ready = True
@@ -98,10 +122,17 @@ class LanServer:
             for conn, reader, name in self.clients:
                 if name in ready_clients:
                     continue
+
+                try:
+                    readable, _, _ = select.select([conn], [], [], 0)
+                except Exception:
+                    continue
+
+                if not readable:
+                    continue
+
                 try:
                     msg = _recv_json(reader)
-                except socket.timeout:
-                    continue
                 except Exception:
                     continue
 
@@ -110,13 +141,14 @@ class LanServer:
                 if msg.get('type') == 'ready' and bool(msg.get('ready', True)):
                     ready_clients.add(name)
 
+            joined_count = len(self.clients) + 1
             total_ready = (1 if host_ready else 0) + len(ready_clients)
 
-            state = (total_ready, expected_total)
+            state = (joined_count, total_ready, expected_total)
             if state != last_state:
                 if on_progress is not None:
-                    on_progress(total_ready, expected_total)
-                self._broadcast_ready_state(total_ready, expected_total)
+                    on_progress(joined_count, total_ready, expected_total)
+                self._broadcast_ready_state(joined_count, total_ready, expected_total)
                 last_state = state
 
             if total_ready >= expected_total:
@@ -197,23 +229,41 @@ class LanClient:
             raise RuntimeError(f'Join failed: {reason}')
         return ack
 
-    def wait_start(self, ready_event: Optional[threading.Event] = None, on_ready_state=None):
+    def wait_start(
+        self,
+        ready_event: Optional[threading.Event] = None,
+        on_ready_state=None,
+        stop_event: Optional[threading.Event] = None,
+    ):
         if self.reader is None or self.sock is None:
             raise RuntimeError('Client is not connected.')
 
         # Keep receiving ready-state updates in real time even before this client
         # presses READY. Send READY once the local event is set.
-        self.sock.settimeout(0.2)
         ready_sent = False
 
         while True:
+            if stop_event is not None and stop_event.is_set():
+                return
+
+            if self.sock is None or self.reader is None:
+                return
+
             if ready_event is not None and ready_event.is_set() and not ready_sent:
                 self.send_ready()
                 ready_sent = True
 
             try:
+                readable, _, _ = select.select([self.sock], [], [], 0.2)
+            except Exception:
+                readable = []
+
+            if not readable:
+                continue
+
+            try:
                 msg = _recv_json(self.reader)
-            except socket.timeout:
+            except Exception:
                 continue
 
             if not msg:
@@ -222,7 +272,11 @@ class LanClient:
             msg_type = msg.get('type')
             if msg_type == 'ready_state':
                 if on_ready_state is not None:
-                    on_ready_state(int(msg.get('ready', 0)), int(msg.get('expected', 1)))
+                    on_ready_state(
+                        int(msg.get('joined', msg.get('expected', 1))),
+                        int(msg.get('ready', 0)),
+                        int(msg.get('expected', 1)),
+                    )
                 continue
 
             if msg_type == 'start':

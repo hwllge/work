@@ -31,6 +31,7 @@ class LanState:
         self.error = None
         self._ready_event = threading.Event()
         self._score_event = threading.Event()
+        self._cancel_event = threading.Event()
         self._final_score = 0
 
     def set_local_ready(self):
@@ -119,13 +120,19 @@ def _open_camera(game_cfg):
 
 def _server_thread(server: LanServer, lan_st: LanState):
     try:
-        def _on_ready_progress(ready_count: int, expected: int):
+        def _on_ready_progress(joined_count: int, ready_count: int, expected: int):
             with lan_st.lock:
+                lan_st.joined = joined_count
                 lan_st.ready = ready_count
-                lan_st.joined = expected
                 lan_st.expected = expected
 
-        server.wait_all_ready(lan_st._ready_event, on_progress=_on_ready_progress)
+        server.wait_all_ready(
+            lan_st._ready_event,
+            on_progress=_on_ready_progress,
+            stop_event=lan_st._cancel_event,
+        )
+        if lan_st._cancel_event.is_set():
+            return
         server.send_start()
         with lan_st.lock:
             lan_st.started = True
@@ -138,8 +145,9 @@ def _server_thread(server: LanServer, lan_st: LanState):
         with lan_st.lock:
             lan_st.leaderboard = leaderboard
     except Exception as e:
-        with lan_st.lock:
-            lan_st.error = str(e)
+        if not lan_st._cancel_event.is_set():
+            with lan_st.lock:
+                lan_st.error = str(e)
     finally:
         server.close()
 
@@ -152,13 +160,19 @@ def _client_thread(client: LanClient, lan_st: LanState):
             lan_st.expected = ack.get('expected', 3)
             lan_st.ready = 1 if lan_st.local_ready else 0
 
-        def _on_ready_state(ready_count: int, expected: int):
+        def _on_ready_state(joined_count: int, ready_count: int, expected: int):
             with lan_st.lock:
+                lan_st.joined = joined_count
                 lan_st.ready = ready_count
                 lan_st.expected = expected
-                lan_st.joined = expected
 
-        client.wait_start(ready_event=lan_st._ready_event, on_ready_state=_on_ready_state)
+        client.wait_start(
+            ready_event=lan_st._ready_event,
+            on_ready_state=_on_ready_state,
+            stop_event=lan_st._cancel_event,
+        )
+        if lan_st._cancel_event.is_set():
+            return
         with lan_st.lock:
             lan_st.started = True
 
@@ -167,8 +181,9 @@ def _client_thread(client: LanClient, lan_st: LanState):
         with lan_st.lock:
             lan_st.leaderboard = lb
     except Exception as e:
-        with lan_st.lock:
-            lan_st.error = str(e)
+        if not lan_st._cancel_event.is_set():
+            with lan_st.lock:
+                lan_st.error = str(e)
     finally:
         client.close()
 
@@ -375,7 +390,7 @@ class WebGameApp:
                         else:
                             self.lobby['error'] = None
                             self._lan_st = LanState()
-                            self._lan_st.expected = 1
+                            self._lan_st.expected = self.lan_cfg.expected_clients + 1
 
                             if self.lobby['mode'] == 'host':
                                 self._server = LanServer('0.0.0.0', self.lan_cfg.port, self.lan_cfg.expected_clients)
@@ -423,6 +438,22 @@ class WebGameApp:
                         local_ready = self._lan_st.local_ready
                         started = self._lan_st.started
                         err = self._lan_st.error
+
+                    if clicked == 'back_waiting':
+                        self._lan_st._cancel_event.set()
+                        if self._announcer is not None:
+                            self._announcer.stop()
+                            self._announcer = None
+                        if self._client is not None:
+                            self._client.close()
+                            self._client = None
+                        if self._server is not None:
+                            self._server.close()
+                            self._server = None
+                        self._lan_st = None
+                        self.lobby['error'] = None
+                        self.engine.state['state'] = GameEngine.LAN_ROOM_LIST
+                        continue
 
                     if err:
                         self.lobby['error'] = err

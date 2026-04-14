@@ -633,7 +633,10 @@ class GameRenderer:
         else:
             self._draw_button(canvas, 'READY', ready_rect, (0, 185, 95), text_color=(255, 255, 255))
 
-        return {'ready': ready_rect}
+        back_rect = (28, fh - 70, 160, fh - 24)
+        self._draw_button(canvas, 'BACK', back_rect, (70, 70, 70), text_color=(220, 220, 220))
+
+        return {'ready': ready_rect, 'back_waiting': back_rect}
 
     def draw_lan_leaderboard(self, canvas, leaderboard, my_name):
         """Full-screen leaderboard overlay after LAN match ends."""
