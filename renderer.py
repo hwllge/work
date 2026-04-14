@@ -732,7 +732,7 @@ class GameRenderer:
             color = row_colors[i] if i < 3 else (200, 200, 200)
             is_me = _norm_name(entry.get('name', '')) == _norm_name(my_name)
             prefix = f"{i + 1}."
-            text = f"{prefix}  {entry.get('name', '')}  —  {entry.get('score', 0)}"
+            text = f"{prefix}  {entry.get('name', '')}  -  {entry.get('score', 0)}"
             scale = 0.80 if is_me else 0.70
             thick = 2 if is_me else 1
             if is_me:
