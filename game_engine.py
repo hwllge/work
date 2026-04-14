@@ -31,6 +31,9 @@ class GameEngine:
             'cleared': [False, False],
             'round_hits': 0,
             'last_round_hits': 0,
+            'round_score': 0,
+            'last_round_score': 0,
+            'perfect_streak': 0,
             'result_start': None,
             'last_result': None,
             'last_det_ges': None,
@@ -77,11 +80,39 @@ class GameEngine:
             self.state['hold_starts'] = [None, None]
             self.state['cleared'] = [False, False]
             self.state['round_hits'] = 0
+            self.state['round_score'] = 0
         return elapsed
+
+    def _finish_round(self, now):
+        hits = self.state['round_hits']
+        self.state['last_round_hits'] = hits
+        self.state['last_round_score'] = self.state['round_score']
+
+        total_targets = len(self.state['targets']) if self.state['targets'] else 2
+        if hits >= total_targets:
+            self.state['last_result'] = 'SUCCESS'
+            self.state['perfect_streak'] += 1
+        elif hits > 0:
+            self.state['last_result'] = 'PARTIAL'
+            self.state['perfect_streak'] = 0
+        else:
+            self.state['last_result'] = 'FAIL'
+            self.state['perfect_streak'] = 0
+
+        self.state['state'] = self.RESULT
+        self.state['result_start'] = now
 
     def update_playing(self, now, fw, all_hands):
         """all_hands: list of {gesture, cx, cy, w} from detector.detect_all."""
         targets = self.state['targets']
+        if not targets:
+            self.state['targets'] = self.new_targets(fw, self.cfg.cam_h, now)
+            self.state['hold_starts'] = [None, None]
+            self.state['cleared'] = [False, False]
+            self.state['round_hits'] = 0
+            self.state['round_score'] = 0
+            targets = self.state['targets']
+
         hold_starts = self.state['hold_starts']
         cleared = self.state['cleared']
 
@@ -133,6 +164,7 @@ class GameEngine:
                     scale = self.cfg.max_score / float(max_raw_per_hit * max_hits)
                     earned = int(round(raw_score * scale))
                     self.state['score'] = min(self.cfg.max_score, self.state['score'] + earned)
+                    self.state['round_score'] += earned
                     cleared[i] = True
                     self.state['round_hits'] += 1
                     hold_starts[i] = None
@@ -140,15 +172,9 @@ class GameEngine:
                 hold_starts[i] = None
 
         if all(cleared):
-            self.state['last_round_hits'] = self.state['round_hits']
-            self.state['last_result'] = 'SUCCESS'
-            self.state['state'] = self.RESULT
-            self.state['result_start'] = now
+            self._finish_round(now)
         elif elapsed >= target_duration:
-            self.state['last_round_hits'] = self.state['round_hits']
-            self.state['last_result'] = 'FAIL'
-            self.state['state'] = self.RESULT
-            self.state['result_start'] = now
+            self._finish_round(now)
 
         first_hand_w = all_hands[0]['w'] if all_hands else None
         return {
@@ -174,3 +200,4 @@ class GameEngine:
         self.state['hold_starts'] = [None, None]
         self.state['cleared'] = [False, False]
         self.state['round_hits'] = 0
+        self.state['round_score'] = 0

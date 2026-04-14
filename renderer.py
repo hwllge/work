@@ -194,7 +194,7 @@ class GameRenderer:
             cv2.LINE_AA,
         )
 
-    def draw_hud(self, canvas, score, round_idx, det_ges, hit_count=None, hit_total=2):
+    def draw_hud(self, canvas, score, round_idx, det_ges, perfect_streak=0):
         fh, fw = canvas.shape[:2]
         cv2.rectangle(canvas, (0, 0), (fw, self.cfg.hud_h), (20, 20, 20), -1)
         max_score = getattr(self.cfg, 'max_score', 0)
@@ -239,12 +239,12 @@ class GameRenderer:
                 cv2.LINE_AA,
             )
 
-        if hit_count is not None:
-            hit_txt = f'HIT: {hit_count}/{hit_total}'
-            (tw, _), _ = cv2.getTextSize(hit_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
+        if perfect_streak >= 2:
+            streak_txt = f'PERFECT STREAK x{perfect_streak}'
+            (tw, _), _ = cv2.getTextSize(streak_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.52, 1)
             cv2.putText(
                 canvas,
-                hit_txt,
+                streak_txt,
                 ((fw - tw) // 2, self.cfg.hud_h - 6),
                 cv2.FONT_HERSHEY_SIMPLEX,
                 0.52,
@@ -253,17 +253,19 @@ class GameRenderer:
                 cv2.LINE_AA,
             )
 
-    def draw_result(self, canvas, success, hit_count=None, hit_total=2):
+    def draw_result(self, canvas, hit_count=0, hit_total=2, round_score=0):
         fh, fw = canvas.shape[:2]
         if hit_count == hit_total:
             msg = 'PERFECT!'
+            color = (0, 255, 128)
         elif hit_count is not None and hit_count > 0:
             msg = 'GOOD!'
+            color = (80, 220, 255)
         else:
             msg = 'MISS...'
+            color = (0, 80, 255)
         if hit_count is not None:
             msg = f'{msg} ({hit_count}/{hit_total})'
-        color = (0, 255, 128) if success else (0, 80, 255)
         scale = max(1.0, 1.4 * fw / self.cfg.cam_w)
         (tw, th), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, scale, 3)
         tx, ty = (fw - tw) // 2, (fh + th) // 2
@@ -285,6 +287,20 @@ class GameRenderer:
             scale,
             color,
             3,
+            cv2.LINE_AA,
+        )
+
+        gain_txt = f'+{round_score} pts'
+        gain_scale = max(0.65, 0.8 * fw / self.cfg.cam_w)
+        (gw, _), _ = cv2.getTextSize(gain_txt, cv2.FONT_HERSHEY_SIMPLEX, gain_scale, 2)
+        cv2.putText(
+            canvas,
+            gain_txt,
+            ((fw - gw) // 2, ty + int(44 * fw / self.cfg.cam_w)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            gain_scale,
+            (240, 240, 240),
+            2,
             cv2.LINE_AA,
         )
 

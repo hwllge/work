@@ -373,7 +373,8 @@ def run(game_cfg, ges_cfg, lan_cfg):
                                 cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 255, 128), 3, cv2.LINE_AA)
             renderer.draw_hud(frame, engine.state['score'],
                               engine.state['round_idx'] + 1,
-                              engine.state['last_det_ges'])
+                              engine.state['last_det_ges'],
+                              perfect_streak=engine.state['perfect_streak'])
             if play_info['hand_w'] is not None:
                 cv2.putText(frame, f"w:{play_info['hand_w']}",
                             (10, game_cfg.hud_h + 20),
@@ -388,11 +389,12 @@ def run(game_cfg, ges_cfg, lan_cfg):
                 renderer.draw_target(frame, target)
             renderer.draw_hud(frame, engine.state['score'],
                               engine.state['round_idx'] + 1,
-                              engine.state['last_det_ges'])
+                              engine.state['last_det_ges'],
+                              perfect_streak=engine.state['perfect_streak'])
             renderer.draw_result(frame,
-                                 engine.state['last_result'] == 'SUCCESS',
                                  hit_count=engine.state['last_round_hits'],
-                                 hit_total=len(engine.state['targets']))
+                                 hit_total=len(engine.state['targets']),
+                                 round_score=engine.state['last_round_score'])
             engine.update_result(now, fw, fh)
         # ── GAMEOVER (single-player or LAN intermediate) ─────────────────
         elif state == GameEngine.GAMEOVER:
