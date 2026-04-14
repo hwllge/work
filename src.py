@@ -3,6 +3,7 @@ import socket
 import sys
 import threading
 import time
+from glob import glob
 
 import cv2
 
@@ -23,6 +24,56 @@ def _ensure_gui_display() -> bool:
         os.environ['DISPLAY'] = ':0'
         return True
     return False
+
+
+def _open_camera(game_cfg):
+    """Try multiple camera sources and return the first working capture."""
+    candidates = []
+
+    env_idx = os.environ.get('CAMERA_INDEX')
+    if env_idx is not None:
+        try:
+            candidates.append(int(env_idx))
+        except ValueError:
+            pass
+
+    env_dev = os.environ.get('CAMERA_DEVICE')
+    if env_dev:
+        candidates.append(env_dev)
+
+    candidates.extend([0, 1, 2, 3])
+    candidates.extend(sorted(glob('/dev/video*')))
+
+    seen = set()
+    uniq_candidates = []
+    for c in candidates:
+        key = str(c)
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq_candidates.append(c)
+
+    for src in uniq_candidates:
+        cap = cv2.VideoCapture(src, cv2.CAP_V4L2)
+        if not cap.isOpened():
+            cap.release()
+            cap = cv2.VideoCapture(src)
+
+        if not cap.isOpened():
+            cap.release()
+            continue
+
+        cap.set(cv2.CAP_PROP_FRAME_WIDTH, game_cfg.cam_w)
+        cap.set(cv2.CAP_PROP_FRAME_HEIGHT, game_cfg.cam_h)
+        cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+        ok, _ = cap.read()
+        if ok:
+            return cap, src
+
+        cap.release()
+
+    return None, None
 
 
 # ── Shared LAN state (written by background thread, read by main loop) ───────
@@ -133,18 +184,21 @@ def run(game_cfg, ges_cfg, lan_cfg):
         print('Try: export DISPLAY=:0  or run from desktop terminal.')
         sys.exit(1)
 
-    detector = GestureDetector(game_cfg, ges_cfg)
     renderer = GameRenderer(game_cfg, ges_cfg)
     engine = GameEngine(game_cfg, ges_cfg.gestures)
     input_mgr = InputManager()
 
-    cap = cv2.VideoCapture(0)
-    if not cap.isOpened():
+    cap, opened_src = _open_camera(game_cfg)
+    if cap is None:
         print('[ERROR] Camera open failed.')
+        devices = sorted(glob('/dev/video*'))
+        print(f"[INFO] Detected video devices: {devices if devices else 'none'}")
+        print('[INFO] You can set CAMERA_INDEX or CAMERA_DEVICE env var.')
         sys.exit(1)
-    cap.set(cv2.CAP_PROP_FRAME_WIDTH, game_cfg.cam_w)
-    cap.set(cv2.CAP_PROP_FRAME_HEIGHT, game_cfg.cam_h)
-    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    print(f'[INFO] Camera source: {opened_src}')
+
+    detector = GestureDetector(game_cfg, ges_cfg)
 
     WIN = 'RPS Target Game'
     cv2.namedWindow(WIN, cv2.WINDOW_NORMAL)
