@@ -501,7 +501,7 @@ def run(game_cfg, ges_cfg, lan_cfg):
                     # Score not yet sent — send once
                     if not lan_st._score_event.is_set():
                         lan_st.set_score(engine.state['score'])
-                    renderer.draw_gameover(frame, engine.state['score'])
+                    renderer.draw_gameover(frame, engine.state['score'], show_buttons=False)
 
                     wait_msg = 'Waiting for other players to finish...'
                     sub_msg = f'Your score: {engine.state["score"]}'

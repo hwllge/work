@@ -345,7 +345,7 @@ class GameRenderer:
         )
 
 
-    def draw_gameover(self, canvas, score):
+    def draw_gameover(self, canvas, score, show_buttons=True):
         fh, fw = canvas.shape[:2]
         sc = fw / self.cfg.cam_w
         overlay = canvas.copy()
@@ -379,6 +379,9 @@ class GameRenderer:
                     cv2.LINE_AA,
                 )
             y += int(fh * 0.10)
+
+        if not show_buttons:
+            return {}
 
         btn_sc = 0.75 * sc
         btn_th = 2
