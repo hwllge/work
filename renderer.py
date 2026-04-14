@@ -360,9 +360,12 @@ class GameRenderer:
         lines = [
             ('GAME OVER', 1.10 * sc, (0, 210, 255), 2),
             (f'Score: {score} / {max_score}', 0.85 * sc, (255, 255, 255), 2),
-            ('', 0.50 * sc, (150, 150, 150), 1),
-            ('[ Q ] Quit', 0.55 * sc, (180, 80, 80), 1),
         ]
+        if show_buttons:
+            lines += [
+                ('', 0.50 * sc, (150, 150, 150), 1),
+                ('[ Q ] Quit', 0.55 * sc, (180, 80, 80), 1),
+            ]
 
         y = int(fh * 0.15)
         for text, scale, color, thick in lines:
