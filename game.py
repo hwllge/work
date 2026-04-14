@@ -7,6 +7,12 @@ from glob import glob
 
 import cv2
 
+try:
+    import pygame
+    _PYGAME_AVAILABLE = True
+except ImportError:
+    _PYGAME_AVAILABLE = False
+
 from config import GameConfig, GestureConfig, LanConfig
 from game_engine import GameEngine
 from gesture_detector import GestureDetector
@@ -112,6 +118,71 @@ class LanState:
     def wait_score(self) -> int:
         self._score_event.wait()
         return self._final_score
+
+
+# ── Sound manager ─────────────────────────────────────────────────────────────
+
+class SoundManager:
+    """pygame.mixer.music 기반 사운드 재생 관리."""
+
+    def __init__(self):
+        self.available = _PYGAME_AVAILABLE
+        self.sounds = {}
+        if self.available:
+            try:
+                pygame.mixer.init()
+            except Exception as e:
+                print(f'[WARN] pygame.mixer 초기화 실패: {e}')
+                self.available = False
+
+    def load(self, name: str, filepath: str):
+        if not self.available:
+            return
+        if not os.path.isfile(filepath):
+            print(f'[WARN] 사운드 파일 없음: {filepath}')
+            return
+        self.sounds[name] = filepath
+
+    def play(self, name: str):
+        if not self.available or name not in self.sounds:
+            return
+        try:
+            pygame.mixer.music.load(self.sounds[name])
+            pygame.mixer.music.play(loops=0)
+        except Exception as e:
+            print(f'[WARN] 사운드 재생 실패 ({name}): {e}')
+
+    def play_bgm(self):
+        if not self.available or 'bgm' not in self.sounds:
+            return
+        try:
+            pygame.mixer.music.load(self.sounds['bgm'])
+            pygame.mixer.music.play(loops=-1)
+        except Exception as e:
+            print(f'[WARN] BGM 재생 실패: {e}')
+
+    def stop(self):
+        if self.available:
+            try:
+                pygame.mixer.music.stop()
+            except Exception:
+                pass
+
+
+_sound_manager: SoundManager | None = None
+
+
+def _init_sounds():
+    global _sound_manager
+    if _sound_manager is None:
+        _sound_manager = SoundManager()
+    if not _sound_manager.available:
+        print('[INFO] pygame 없음 — 사운드 비활성화. 설치: pip install pygame')
+        return
+    sound_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'sounds')
+    _sound_manager.load('perfect', os.path.join(sound_dir, 'perfect.mp3'))
+    _sound_manager.load('miss',    os.path.join(sound_dir, 'miss.mp3'))
+    _sound_manager.load('bgm',     os.path.join(sound_dir, 'bgm.mp3'))
 
 
 LAN_NICKNAMES = [
@@ -229,6 +300,8 @@ def run(game_cfg, ges_cfg, lan_cfg):
         sys.exit(1)
 
     print(f'[INFO] Camera source: {opened_src}')
+
+    _init_sounds()
 
     detector = GestureDetector(game_cfg, ges_cfg)
 
@@ -456,6 +529,8 @@ def run(game_cfg, ges_cfg, lan_cfg):
         elif state == GameEngine.COUNTDOWN:
             elapsed = engine.update_countdown(now, fw, fh)
             renderer.draw_countdown(frame, max(0, 3 - int(elapsed)))
+            if engine.state['state'] == GameEngine.PLAYING and _sound_manager:
+                _sound_manager.play_bgm()
 
         # ── PLAYING ────────────────────────────────────────────────────────────────
         elif state == GameEngine.PLAYING:
@@ -474,6 +549,9 @@ def run(game_cfg, ges_cfg, lan_cfg):
                 if in_t:
                     cv2.circle(frame, (target['x'], target['y']), target['r'], (255, 255, 255), 2)
 
+            for snd in play_info.get('sounds', []):
+                if _sound_manager:
+                    _sound_manager.play(snd)
             renderer.draw_flashes(frame, engine.state['flashes'], now)
             renderer.draw_hud(frame, engine.state['score'],
                               min(engine.state['round_idx'] + 1, game_cfg.total_rounds),
@@ -493,6 +571,8 @@ def run(game_cfg, ges_cfg, lan_cfg):
             engine.state['state'] = GameEngine.PLAYING
         # ── GAMEOVER (single-player or LAN intermediate) ─────────────────
         elif state == GameEngine.GAMEOVER:
+            if _sound_manager:
+                _sound_manager.stop()
             if lan_st is not None:
                 # LAN match: report score to background thread, wait for leaderboard
                 with lan_st.lock:

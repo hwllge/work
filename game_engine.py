@@ -98,6 +98,7 @@ class GameEngine:
         hold_progresses = []
         in_targets = []
         targets_to_remove = []
+        sounds = []  # sound events to play this frame
 
         for target in targets:
             elapsed = now - target['start']
@@ -144,6 +145,7 @@ class GameEngine:
                             'expire': now + self.cfg.result_show,
                         }
                     )
+                    sounds.append('perfect')
                     targets_to_remove.append(target)
             else:
                 if target['hold_start'] is not None:
@@ -167,6 +169,7 @@ class GameEngine:
                         'expire': now + self.cfg.result_show,
                     }
                 )
+                sounds.append('miss')
                 targets_to_remove.append(target)
 
             hold_progresses.append(hold_progress)
@@ -199,6 +202,7 @@ class GameEngine:
             'hand_w': first_hand_w,
             'min_w': min_w,
             'max_w': max_w,
+            'sounds': sounds,
         }
 
     def update_result(self, now, fw, fh):
