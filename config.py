@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
@@ -51,37 +50,3 @@ class GestureConfig:
         default_factory=lambda: {'SCISSORS': 'V', 'ROCK': 'O', 'PAPER': '='}
     )
 
-
-def resolve_model_path(script_path: str) -> str:
-    script_dir = os.path.dirname(os.path.abspath(script_path))
-    env_path = os.environ.get('RPS_MODEL_PATH')
-    if env_path and os.path.isfile(env_path):
-        return env_path
-
-    candidates = [
-        os.path.join(script_dir, 'models', 'RPS_MobileNetV2.tflite'),
-        os.path.join(script_dir, 'models', 'RPS_MobileNetV2_Augmentation.tflite'),
-        os.path.join(script_dir, 'models', 'RPS_MobileNetV2_Augmentation_QAT.tflite'),
-        os.path.join(script_dir, 'models', 'RPS_MobileNetV2_Augmentation_PTQ_INT8.tflite'),
-        os.path.join(
-            script_dir,
-            '..',
-            'examples',
-            '03_CNN_Based_On-Device_AI',
-            'RPS_MobileNetV2_Augmentation.tflite',
-        ),
-        os.path.join(
-            script_dir,
-            '..',
-            'examples',
-            '03_CNN_Based_On-Device_AI',
-            'RPS_MobileNetV2.tflite',
-        ),
-    ]
-    for path in candidates:
-        if os.path.isfile(path):
-            return path
-    raise FileNotFoundError(
-        'Could not find RPS TFLite model file. '
-        'Set RPS_MODEL_PATH or place a model under miniproject/models/.'
-    )

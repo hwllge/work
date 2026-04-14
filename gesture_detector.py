@@ -10,8 +10,7 @@ from config import GameConfig, GestureConfig
 
 
 class GestureDetector:
-    def __init__(self, model_path: str, game_cfg: GameConfig, ges_cfg: GestureConfig):
-        del model_path
+    def __init__(self, game_cfg: GameConfig, ges_cfg: GestureConfig):
         self.game_cfg = game_cfg
         self.ges_cfg = ges_cfg
         self._mp_hands = mp.solutions.hands

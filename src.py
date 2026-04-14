@@ -6,7 +6,7 @@ import time
 
 import cv2
 
-from config import GameConfig, GestureConfig, LanConfig, resolve_model_path
+from config import GameConfig, GestureConfig, LanConfig
 from game_engine import GameEngine
 from gesture_detector import GestureDetector
 from input_manager import InputManager, handle_text_input
@@ -133,8 +133,7 @@ def run(game_cfg, ges_cfg, lan_cfg):
         print('Try: export DISPLAY=:0  or run from desktop terminal.')
         sys.exit(1)
 
-    model_path = resolve_model_path(__file__)
-    detector = GestureDetector(model_path, game_cfg, ges_cfg)
+    detector = GestureDetector(game_cfg, ges_cfg)
     renderer = GameRenderer(game_cfg, ges_cfg)
     engine = GameEngine(game_cfg, ges_cfg.gestures)
     input_mgr = InputManager()
