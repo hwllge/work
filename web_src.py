@@ -342,11 +342,6 @@ class WebGameApp:
                         self.lobby['focus'] = 'name'
                         self.lobby['error'] = None
                         self.engine.state['state'] = GameEngine.LAN_LOBBY
-                    elif clicked == 'join_manual':
-                        self.lobby['mode'] = 'join'
-                        self.lobby['focus'] = 'ip'
-                        self.lobby['error'] = None
-                        self.engine.state['state'] = GameEngine.LAN_LOBBY
                     elif clicked and clicked.startswith('room_'):
                         try:
                             idx = int(clicked.split('_')[1])

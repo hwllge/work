@@ -18,6 +18,10 @@ from renderer import GameRenderer
 # ── Display guard ────────────────────────────────────────────────────────────
 
 def _ensure_gui_display() -> bool:
+    # Windows/macOS do not use DISPLAY/WAYLAND env checks for OpenCV windows.
+    if os.name == 'nt' or sys.platform == 'darwin':
+        return True
+
     if os.environ.get('DISPLAY') or os.environ.get('WAYLAND_DISPLAY'):
         return True
     if os.path.exists('/tmp/.X11-unix/X0'):
@@ -291,11 +295,6 @@ def run(game_cfg, ges_cfg, lan_cfg):
             elif clicked == 'create_room':
                 lobby['mode'] = 'host'
                 lobby['focus'] = 'name'
-                lobby['error'] = None
-                engine.state['state'] = GameEngine.LAN_LOBBY
-            elif clicked == 'join_manual':
-                lobby['mode'] = 'join'
-                lobby['focus'] = 'ip'
                 lobby['error'] = None
                 engine.state['state'] = GameEngine.LAN_LOBBY
             elif clicked and clicked.startswith('room_'):

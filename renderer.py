@@ -393,7 +393,7 @@ class GameRenderer:
     # ── LAN screens ──────────────────────────────────────────────────────────
 
     def draw_lan_room_list(self, canvas, rooms):
-        """Show LAN room list first, with Create Room and Join Manual buttons."""
+        """Show LAN room list first, with Create Room button."""
         fh, fw = canvas.shape[:2]
         overlay = canvas.copy()
         cv2.rectangle(overlay, (0, 0), (fw, fh), (8, 8, 8), -1)
@@ -427,27 +427,23 @@ class GameRenderer:
                 room_buttons[f'room_{idx}'] = row_rect
                 ry += 40
         else:
-            msg = 'No rooms discovered yet. Use JOIN MANUAL or create a room.'
+            msg = 'No rooms discovered yet. Wait a moment or create a room.'
             (mw, _), _ = cv2.getTextSize(msg, cv2.FONT_HERSHEY_SIMPLEX, 0.56, 1)
             cv2.putText(canvas, msg, ((fw - mw) // 2, (y1 + y2) // 2),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.56, (170, 170, 170), 1, cv2.LINE_AA)
 
         # Buttons
-        bw = int(fw * 0.24)
+        bw = int(fw * 0.26)
         bh = int(fh * 0.09)
         by = int(fh * 0.72)
-        cx = fw // 2
-        create_rect = (cx - bw - 20, by, cx - 20, by + bh)
-        join_rect = (cx + 20, by, cx + 20 + bw, by + bh)
+        create_rect = ((fw - bw) // 2, by, (fw - bw) // 2 + bw, by + bh)
         back_rect = (28, fh - 70, 160, fh - 24)
 
         self._draw_button(canvas, 'CREATE ROOM', create_rect, (0, 185, 95), text_color=(255, 255, 255))
-        self._draw_button(canvas, 'JOIN MANUAL', join_rect, (55, 135, 255), text_color=(255, 255, 255))
         self._draw_button(canvas, 'BACK', back_rect, (70, 70, 70), text_color=(220, 220, 220))
 
         buttons = {
             'create_room': create_rect,
-            'join_manual': join_rect,
             'back': back_rect,
         }
         buttons.update(room_buttons)
