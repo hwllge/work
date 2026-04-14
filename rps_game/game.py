@@ -12,10 +12,12 @@ import time
 import random
 import cv2
 import os
-import threading
+from threading import Thread, Lock, Event
+
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlparse
+import argparse
 from cvzone.HandTrackingModule import HandDetector
 
 # ─── Hand Detector ───────────────────────────────────────────────────────────
@@ -24,7 +26,7 @@ hd = HandDetector(maxHands=2)
 # ─── TFLite 모델 로딩 (sample_01 동일 방식) ───────────────────────────────────
 _SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 _MODEL_CANDIDATES = [
-    # 학습한 모델 추가
+    os.path.join(_SCRIPT_DIR, 'sample_01.tflite'),
     os.path.join(_SCRIPT_DIR, '..', 'examples', '03_CNN_Based_On-Device_AI',
                  'RPS_MobileNetV2_Augmentation.tflite'),
     os.path.join(_SCRIPT_DIR, '..', 'examples', '03_CNN_Based_On-Device_AI',
@@ -39,7 +41,6 @@ output_details = interpreter.get_output_details()
 input_dtype    = input_details[0]['dtype']
 IMG_SIZE       = 224
 offset         = 30
-
 
 
 # ─── 비동기 감지 워커 (별도 스레드에서 손 감지 + 제스처 분류) ──────────────────
@@ -116,12 +117,13 @@ class AsyncDetector:
             })
         return results
 
+
 # ─── 카메라 / 화면 해상도 ────────────────────────────────────────────────────
 CAM_W, CAM_H = 1024, 600
 
 # ─── 게임 설정 ────────────────────────────────────────────────────────────────
 TOTAL_ROUNDS    = 10     # 총 라운드 수
-TARGET_DURATION = 3.0    # 타겟 유지 시간 (초)
+TARGET_DURATION = 2.0    # 타겟 유지 시간 (초)
 RESULT_SHOW     = 0.5    # 성공/실패 결과 표시 시간 (초)
 HOLD_TIME       = 0.3    # 정답 동작 유지 시간 (초)
 TARGET_RADIUS   = 70     # 타겟 원 반지름 (px)
@@ -138,14 +140,19 @@ MIN_TARGET_DURATION = 0.6 # 타겟 지속시간의 하한 (초)
 # ─── 터치 상태 ───────────────────────────────────────────────────────────────
 _touch = {'tapped': False, 'btn': None}   # btn: (x1, y1, x2, y2)
 
+
 # ─── 웹 스트리밍 상태 ─────────────────────────────────────────────────────────
+
 WEB_HOST = '0.0.0.0'
 WEB_PORT = 8000
-_frame_lock = threading.Lock()
+_frame_lock = Lock()
 _latest_jpeg = None
+_frame_event = Event()   # 새 프레임 도착시 set()
 _running = True
 _restart_requested = False
 _quit_requested = False
+_last_publish_time = 0.0
+_PUBLISH_FPS = 25          # 웹 스트림 목표 FPS
 
 
 def _on_mouse(event, x, y, flags, param):
@@ -157,13 +164,18 @@ def _on_mouse(event, x, y, flags, param):
 
 
 def _publish_frame(frame):
-    """현재 프레임을 JPEG로 인코딩해 웹 스트리밍 버퍼에 저장."""
-    global _latest_jpeg
-    ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 85])
+    """현재 프레임을 JPEG로 인코딩해 웹 스트리밍 버퍼에 저장. 25fps로 제한."""
+    global _latest_jpeg, _last_publish_time
+    now = time.time()
+    if now - _last_publish_time < 1.0 / _PUBLISH_FPS:
+        return
+    _last_publish_time = now
+    ok, buf = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
     if not ok:
         return
     with _frame_lock:
         _latest_jpeg = buf.tobytes()
+    _frame_event.set()   # 대기 중인 스트림 핸들러 즉시 깨움
 
 
 class _WebHandler(BaseHTTPRequestHandler):
@@ -229,17 +241,18 @@ class _WebHandler(BaseHTTPRequestHandler):
 
         try:
             while _running:
+                # 새 프레임이 올 때까지 대기 (폴링 없이 즉시 반응)
+                _frame_event.wait(timeout=1.0)
+                _frame_event.clear()
                 with _frame_lock:
                     jpg = _latest_jpeg
                 if jpg is None:
-                    time.sleep(0.03)
                     continue
                 self.wfile.write(b'--frame\r\n')
                 self.wfile.write(b'Content-Type: image/jpeg\r\n')
                 self.wfile.write(f'Content-Length: {len(jpg)}\r\n\r\n'.encode('ascii'))
                 self.wfile.write(jpg)
                 self.wfile.write(b'\r\n')
-                time.sleep(0.03)
         except (BrokenPipeError, ConnectionResetError):
             pass
 
@@ -263,15 +276,14 @@ class _WebHandler(BaseHTTPRequestHandler):
 
 def _start_web_server(host=WEB_HOST, port=WEB_PORT):
     server = ThreadingHTTPServer((host, port), _WebHandler)
-    th = threading.Thread(target=server.serve_forever, daemon=True)
+    th = Thread(target=server.serve_forever, daemon=True)
     th.start()
     return server
-
 
 # ─── 제스처 매핑 ─────────────────────────────────────────────────────────────
 ansToText = {0: 'SCISSORS', 1: 'ROCK', 2: 'PAPER'}
 colorList  = [(80, 200, 255), (80, 255, 80), (255, 80, 80)]
-GES_KO     = {'SCISSORS': 'SCISSORS(가위)', 'ROCK': 'ROCK(바위)', 'PAPER': 'PAPER(보)'}
+GES_KO     = {'SCISSORS': 'SCISSORS', 'ROCK': 'ROCK', 'PAPER': 'PAPER'}
 GES_ICON   = {'SCISSORS': 'V', 'ROCK': 'O', 'PAPER': '='}
 GESTURES   = ['SCISSORS', 'ROCK', 'PAPER']
 
@@ -320,6 +332,7 @@ def new_target(fw, fh):
         'start':   time.time(),
     }
 
+
 # ─── 타겟 원 그리기 ───────────────────────────────────────────────────────────
 def draw_target(canvas, target, hold_progress=0.0, target_dur=TARGET_DURATION):
     x, y, r   = target['x'], target['y'], target['r']
@@ -360,8 +373,9 @@ def draw_target(canvas, target, hold_progress=0.0, target_dur=TARGET_DURATION):
     cv2.putText(canvas, label, (x - tw // 2, y + r + th + 6),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.45, color, 1, cv2.LINE_AA)
 
+
 # ─── HUD ─────────────────────────────────────────────────────────────────────
-def draw_hud(canvas, score, round_idx, det_ges):
+def draw_hud(canvas, score, round_idx, det_gestures):
     fh, fw = canvas.shape[:2]
     cv2.rectangle(canvas, (0, 0), (fw, HUD_H), (20, 20, 20), -1)
 
@@ -375,10 +389,10 @@ def draw_hud(canvas, score, round_idx, det_ges):
     cv2.putText(canvas, rnd, (fw - tw - 10, 26),
                 cv2.FONT_HERSHEY_SIMPLEX, 0.62, (180, 180, 180), 1, cv2.LINE_AA)
 
-    # 현재 감지 제스처 (가운데)
-    if det_ges:
-        idx = GESTURES.index(det_ges)
-        det_txt = f'[ {det_ges} ]'
+    # 현재 감지 제스처 (가운데) ─ 복수 손 지원
+    if det_gestures:
+        idx = GESTURES.index(det_gestures[0])
+        det_txt = '[ ' + ' | '.join(det_gestures) + ' ]'
         (tw, _), _ = cv2.getTextSize(det_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.55, 1)
         cv2.putText(canvas, det_txt, ((fw - tw) // 2, 26),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.55, colorList[idx], 1, cv2.LINE_AA)
@@ -465,22 +479,41 @@ def reset_game():
         'hold_start':      None,
         'result_start':    None,
         'last_result':     None,
-        'last_det_ges':    None,
+        'last_det_ges':    [],
     }
 
 
-# ─── 메인 루프 (sample_01 방식: cv2.imshow + waitKey) ────────────────────────
+# ─── 메인 루프 ─────────────────────────────────────────────────────────────────────
+ARG_MODES = ('web', 'display')
+
+
 def main():
+    parser = argparse.ArgumentParser(description='RPS Target Game')
+    parser.add_argument('--mode', choices=ARG_MODES, default='web',
+                        help='Output mode: web (HTTP stream) or display (cv2 window)')
+    args = parser.parse_args()
+    use_web     = (args.mode == 'web')
+    use_display = (args.mode == 'display')
+
     global _running, _restart_requested, _quit_requested
 
-    server = _start_web_server(WEB_HOST, WEB_PORT)
-    print(f'Open browser: http://127.0.0.1:{WEB_PORT}')
-    print(f'LAN access   : http://<device-ip>:{WEB_PORT}')
+    server = None
+    if use_web:
+        server = _start_web_server(WEB_HOST, WEB_PORT)
+        print(f'Open browser: http://127.0.0.1:{WEB_PORT}')
+        print(f'LAN access   : http://<device-ip>:{WEB_PORT}')
+
+    if use_display:
+        cv2.namedWindow('RPS Target Game', cv2.WINDOW_NORMAL)
+        cv2.setWindowProperty('RPS Target Game', cv2.WND_PROP_FULLSCREEN, cv2.WINDOW_FULLSCREEN)
+        cv2.setMouseCallback('RPS Target Game', _on_mouse)
 
     cap = cv2.VideoCapture(0)
     cap.set(cv2.CAP_PROP_FRAME_WIDTH,  CAM_W)
     cap.set(cv2.CAP_PROP_FRAME_HEIGHT, CAM_H)
     cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
+    detector = AsyncDetector()
 
     g = reset_game()
 
@@ -496,6 +529,9 @@ def main():
             fh, fw = frame.shape[:2]
             now = time.time()
 
+            # 비동기 감지 스레드에 현재 프레임 전달
+            detector.submit(frame)
+
             # ── COUNTDOWN ────────────────────────────────────────────────────
             if g['state'] == 'COUNTDOWN':
                 elapsed = now - g['countdown_start']
@@ -504,7 +540,7 @@ def main():
                     g['state']  = 'PLAYING'
                     g['target'] = new_target(fw, fh)
 
-           # ── PLAYING ──────────────────────────────────────────────────────
+            # ── PLAYING ──────────────────────────────────────────────────────
             elif g['state'] == 'PLAYING':
                 det_results = detector.get_results()
                 draw_hand_overlays(frame, det_results)
@@ -554,12 +590,16 @@ def main():
                     g['state']        = 'RESULT'
                     g['result_start'] = now
 
-                draw_target(frame, target, hold_progress)
-                draw_hud(frame, g['score'], g['round_idx'] + 1, det_ges)
+                draw_target(frame, target, hold_progress, target_duration)
+                draw_hud(frame, g['score'], g['round_idx'] + 1, det_gestures)
 
             # ── RESULT ───────────────────────────────────────────────────────
             elif g['state'] == 'RESULT':
-                draw_target(frame, g['target'])
+                det_results = detector.get_results()
+                draw_hand_overlays(frame, det_results)
+                target_duration = max(MIN_TARGET_DURATION,
+                                    TARGET_DURATION * (DECAY_RATE ** g['round_idx']))
+                draw_target(frame, g['target'], target_dur=target_duration)
                 draw_hud(frame, g['score'], g['round_idx'] + 1, g['last_det_ges'])
                 draw_result(frame, g['last_result'] == 'SUCCESS')
 
@@ -583,16 +623,27 @@ def main():
             if _quit_requested:
                 _running = False
 
-            _publish_frame(frame)
-            time.sleep(0.005)
+            if use_display:
+                cv2.imshow('RPS Target Game', frame)
+                key = cv2.waitKey(1) & 0xFF
+                if key == ord('q') or key == ord('Q'):
+                    _running = False
+
+            if use_web:
+                _publish_frame(frame)
+
     except KeyboardInterrupt:
         _running = False
     finally:
+        detector.stop()
         cap.release()
-        server.shutdown()
-        server.server_close()
+        if use_display:
+            cv2.destroyAllWindows()
+        if server:
+            server.shutdown()
+            server.server_close()
 
-    print(f'Game over! Final score: {g["score"]}')
+
 
 
 if __name__ == '__main__':
