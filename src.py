@@ -161,7 +161,13 @@ def _client_thread(client: LanClient, lan_st: LanState):
         lan_st._ready_event.wait()
         client.send_ready()
 
-        client.wait_start()
+        def _on_ready_state(ready_count: int, expected: int):
+            with lan_st.lock:
+                lan_st.ready = ready_count
+                lan_st.expected = expected
+                lan_st.joined = expected
+
+        client.wait_start(on_ready_state=_on_ready_state)
         with lan_st.lock:
             lan_st.started = True
 

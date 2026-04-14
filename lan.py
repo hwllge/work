@@ -64,6 +64,14 @@ class LanServer:
             _send_json(conn, {'type': 'start'})
         print('[LAN] Match started.')
 
+    def _broadcast_ready_state(self, ready_count: int, expected_total: int):
+        payload = {'type': 'ready_state', 'ready': int(ready_count), 'expected': int(expected_total)}
+        for conn, _, _ in self.clients:
+            try:
+                _send_json(conn, payload)
+            except Exception:
+                pass
+
     def wait_all_ready(self, host_ready_event: threading.Event, on_progress=None):
         if self.server_sock is None:
             raise RuntimeError('Server is not started.')
@@ -71,6 +79,7 @@ class LanServer:
         self.server_sock.settimeout(0.2)
         ready_clients = set()
         host_ready = False
+        last_state = (-1, -1)
 
         while True:
             try:
@@ -85,8 +94,6 @@ class LanServer:
 
             if not host_ready and host_ready_event.is_set():
                 host_ready = True
-                if on_progress is not None:
-                    on_progress((1 if host_ready else 0) + len(ready_clients), expected_total)
 
             for conn, reader, name in self.clients:
                 if name in ready_clients:
@@ -102,10 +109,16 @@ class LanServer:
                     continue
                 if msg.get('type') == 'ready' and bool(msg.get('ready', True)):
                     ready_clients.add(name)
-                    if on_progress is not None:
-                        on_progress((1 if host_ready else 0) + len(ready_clients), expected_total)
 
             total_ready = (1 if host_ready else 0) + len(ready_clients)
+
+            state = (total_ready, expected_total)
+            if state != last_state:
+                if on_progress is not None:
+                    on_progress(total_ready, expected_total)
+                self._broadcast_ready_state(total_ready, expected_total)
+                last_state = state
+
             if total_ready >= expected_total:
                 return
 
@@ -184,12 +197,22 @@ class LanClient:
             raise RuntimeError(f'Join failed: {reason}')
         return ack
 
-    def wait_start(self):
+    def wait_start(self, on_ready_state=None):
         if self.reader is None:
             raise RuntimeError('Client is not connected.')
-        msg = _recv_json(self.reader)
-        if not msg or msg.get('type') != 'start':
-            raise RuntimeError('Server did not send start signal.')
+        while True:
+            msg = _recv_json(self.reader)
+            if not msg:
+                raise RuntimeError('Server connection closed before start signal.')
+
+            msg_type = msg.get('type')
+            if msg_type == 'ready_state':
+                if on_ready_state is not None:
+                    on_ready_state(int(msg.get('ready', 0)), int(msg.get('expected', 1)))
+                continue
+
+            if msg_type == 'start':
+                return
 
     def send_ready(self):
         if self.sock is None:
