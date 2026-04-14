@@ -528,8 +528,6 @@ def run(game_cfg, ges_cfg, lan_cfg):
                 _client = None
                 engine.state['state'] = GameEngine.MENU
 
-            buttons['exit'] = renderer.draw_exit_button(frame)
-
         input_mgr.set_buttons(buttons)
         cv2.imshow(WIN, frame)
         key = cv2.waitKey(10) & 0xFF

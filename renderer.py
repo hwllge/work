@@ -83,6 +83,7 @@ class GameRenderer:
         run_rect = (bx, int(fh * 0.42), bx + bw, int(fh * 0.42) + bh)
         lan_rect = (bx, int(fh * 0.55), bx + bw, int(fh * 0.55) + bh)
         how_rect = (bx, int(fh * 0.68), bx + bw, int(fh * 0.68) + bh)
+        exit_rect = (bx, int(fh * 0.81), bx + bw, int(fh * 0.81) + bh)
 
         self._draw_button(canvas, 'RUN', run_rect, (0, 185, 95))
         self._draw_button(canvas, 'LAN MULTIPLAYER', lan_rect, (180, 80, 200),
@@ -94,6 +95,7 @@ class GameRenderer:
             (55, 135, 255),
             text_color=(255, 255, 255),
         )
+        self._draw_button(canvas, 'EXIT', exit_rect, (70, 70, 180), text_color=(255, 255, 255))
 
         cv2.putText(
             canvas,
@@ -106,7 +108,7 @@ class GameRenderer:
             cv2.LINE_AA,
         )
 
-        return {'run': run_rect, 'lan': lan_rect, 'howto': how_rect}
+        return {'run': run_rect, 'lan': lan_rect, 'howto': how_rect, 'exit': exit_rect}
 
     def draw_howto(self, canvas):
         fh, fw = canvas.shape[:2]
