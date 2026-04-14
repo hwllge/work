@@ -85,6 +85,7 @@ def _open_camera(game_cfg):
 class LanState:
     def __init__(self):
         self.lock = threading.Lock()
+        self.local_name = ''
         self.joined = 0          # clients joined so far (server) / 1 when joined (client)
         self.expected = 1
         self.ready = 0
@@ -157,7 +158,8 @@ def _server_thread(server: LanServer, lan_st: LanState, start_delay_s: float):
         score = lan_st.wait_score()
         # Server itself is also a player — prepend its own score
         leaderboard = server.collect_scores()
-        leaderboard.append({'name': '_host_', 'score': score})
+        host_name = lan_st.local_name.strip() or '_host_'
+        leaderboard.append({'name': host_name, 'score': score})
         leaderboard.sort(key=lambda x: x['score'], reverse=True)
         server.broadcast_leaderboard(leaderboard)
         with lan_st.lock:
@@ -352,6 +354,7 @@ def run(game_cfg, ges_cfg, lan_cfg):
                 else:
                     lobby['error'] = None
                     lan_st = LanState()
+                    lan_st.local_name = lobby['name'].strip()
                     lan_st.expected = lan_cfg.expected_clients + 1
 
                     if lobby['mode'] == 'host':
@@ -523,7 +526,18 @@ def run(game_cfg, ges_cfg, lan_cfg):
         elif state == GameEngine.LAN_LEADERBOARD:
             with lan_st.lock:
                 lb = lan_st.leaderboard or []
-            buttons = renderer.draw_lan_leaderboard(frame, lb, lobby['name'])
+            my_name = lobby['name'].strip()
+
+            def _norm_name(v: str) -> str:
+                return (v or '').strip().lower()
+
+            lb_for_view = list(lb)
+            if my_name and not any(_norm_name(e.get('name', '')) == _norm_name(my_name) for e in lb_for_view):
+                # Defensive fallback: if server payload missed local row, add it locally.
+                lb_for_view.append({'name': my_name, 'score': int(engine.state['score'])})
+                lb_for_view.sort(key=lambda x: int(x.get('score', 0)), reverse=True)
+
+            buttons = renderer.draw_lan_leaderboard(frame, lb_for_view, my_name)
             if clicked == 'menu':
                 if _announcer is not None:
                     _announcer.stop()
